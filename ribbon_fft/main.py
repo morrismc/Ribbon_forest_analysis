@@ -15,8 +15,6 @@ import os
 import sys
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")  # non-interactive backend for CLI use
 
 from .load_dsm import load_dsm, fill_nodata_nearest, save_geotiff
 from .detrend import detrend_dsm
@@ -224,6 +222,10 @@ def run_phase2(dsm_path, output_dir="outputs", window_size=257, step=64,
 
 
 def main():
+    # Force non-interactive backend only when run as a CLI script
+    import matplotlib
+    matplotlib.use("Agg")
+
     parser = argparse.ArgumentParser(
         description="Ribbon forest spectral analysis using 2D DFT of LiDAR DSM.",
         formatter_class=argparse.RawDescriptionHelpFormatter,

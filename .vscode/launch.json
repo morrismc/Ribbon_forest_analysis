@@ -1,0 +1,45 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Run ribbon forest analysis (run_analysis.py)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/run_analysis.py",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true
+        },
+        {
+            "name": "Run current Python file",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}",
+            "justMyCode": true
+        },
+        {
+            "name": "Run ribbon_fft CLI (Phase 1, full scene)",
+            "type": "debugpy",
+            "request": "launch",
+            "module": "ribbon_fft.main",
+            "cwd": "${workspaceFolder}",
+            "args": [
+                "${input:dsmPath}",
+                "--output-dir",
+                "outputs"
+            ],
+            "console": "integratedTerminal",
+            "justMyCode": true
+        }
+    ],
+    "inputs": [
+        {
+            "id": "dsmPath",
+            "type": "promptString",
+            "description": "Path to the input GeoTIFF DSM",
+            "default": "C:\\Users\\mmorriss\\Desktop\\Side_projects\\Ribbon_forests\\GIS\\Rasters\\Southern_field_site_snowies.tif"
+        }
+    ]
+}
