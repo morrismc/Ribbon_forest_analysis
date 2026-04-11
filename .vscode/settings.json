@@ -1,0 +1,17 @@
+{
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ],
+    "python.terminal.activateEnvInCurrentTerminal": true,
+    "jupyter.interactiveWindow.textEditor.executeSelection": true,
+    "jupyter.interactiveWindow.creationMode": "perFile",
+    "terminal.integrated.cwd": "${workspaceFolder}",
+    "[python]": {
+        "editor.formatOnSave": false,
+        "editor.defaultFormatter": "ms-python.python"
+    },
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true
+    }
+}
