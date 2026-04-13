@@ -68,6 +68,10 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 # is large — start with 1024 or 2048 to keep things snappy, then scale up.
 WINDOW_SIZE = 1024
 
+# Detrending order: 1 = planar, 2 = quadratic, 3 = cubic.
+# Use order >= 2 when the study area spans significant hillslope curvature.
+DETREND_ORDER = 2
+
 # Expected ribbon spacing band: 30–100 m → 0.01–0.033 cycles/m
 FREQ_BAND = (0.01, 0.033)
 
@@ -102,10 +106,9 @@ if WINDOW_SIZE is not None:
     transform = transform * Affine.translation(c0, r0)
     print(f"  Cropped to: {dsm_filled.shape} (central patch)")
 
-# %% Cell 3 — Detrend (remove best-fit plane) ---------------------------------
-print("Detrending (least-squares plane removal)...")
-detrended, plane, coeffs = detrend_dsm(dsm_filled)
-print(f"  Plane: z = {coeffs[0]:.6f}*x + {coeffs[1]:.6f}*y + {coeffs[2]:.2f}")
+# %% Cell 3 — Detrend (remove best-fit surface) -------------------------------
+print(f"Detrending (order={DETREND_ORDER} polynomial surface removal)...")
+detrended, surface, coeffs = detrend_dsm(dsm_filled, order=DETREND_ORDER)
 print(f"  Detrended range: {np.nanmin(detrended):.2f} to {np.nanmax(detrended):.2f} m")
 
 # Save detrended DSM (keeps CRS/transform)
@@ -209,3 +212,65 @@ if RUN_PHASE2:
     plt.show()
 
     print(f"Phase 2 complete. Outputs in: {OUTPUT_DIR}")
+
+# %% Cell 7 — 2D Continuous Wavelet Transform (amplitude–spacing analysis) -----
+# The CWT localises both scale (wavelength) and position simultaneously,
+# giving per-pixel dominant wavelength and amplitude — much finer than the
+# sliding-window FFT.  This is the preferred method for the amplitude-spacing
+# correlation question.
+RUN_CWT = True
+
+if RUN_CWT:
+    from ribbon_fft.wavelet import cwt_2d, cwt_dominant_scale, cwt_amplitude_spacing
+    from ribbon_fft.plotting import plot_amplitude_vs_spacing
+
+    # Wavelet scales to probe (in metres).  Logarithmically spaced from
+    # 5 m to 40 m in scale, which maps to ~20–160 m in wavelength via the
+    # Mexican Hat's scale-to-wavelength factor (~4x).
+    CWT_SCALES = np.geomspace(5.0, 40.0, 25)
+
+    print("2D CWT analysis...")
+    print(f"  Scales: {CWT_SCALES[0]:.1f} – {CWT_SCALES[-1]:.1f} m "
+          f"({len(CWT_SCALES)} scales)")
+
+    coefficients, scales_used = cwt_2d(detrended, dx, scales_m=CWT_SCALES)
+    dom_wavelength, cwt_amplitude, _ = cwt_dominant_scale(coefficients, scales_used)
+
+    print(f"  Dominant wavelength range: "
+          f"{np.nanmin(dom_wavelength):.1f} – {np.nanmax(dom_wavelength):.1f} m")
+    print(f"  Median dominant wavelength: {np.nanmedian(dom_wavelength):.1f} m")
+
+    # Amplitude vs. spacing correlation (CWT-based)
+    wl_s, amp_s, r_cwt, p_cwt = cwt_amplitude_spacing(
+        dom_wavelength, cwt_amplitude, wavelength_range=(20, 120)
+    )
+    print(f"  CWT Pearson r = {r_cwt:.4f}, p = {p_cwt:.2e}, N = {len(wl_s)}")
+
+    # --- Plots ---
+    # Dominant wavelength map
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(dom_wavelength, cmap="viridis", vmin=20, vmax=120)
+    fig.colorbar(im, ax=ax, label="Dominant wavelength (m)")
+    ax.set_title("CWT Dominant Ribbon Wavelength")
+    fig.savefig(OUTPUT_DIR / "cwt_wavelength_map.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
+    # CWT amplitude map
+    fig, ax = plt.subplots(figsize=(10, 8))
+    vmax = np.nanpercentile(cwt_amplitude, 98)
+    im = ax.imshow(cwt_amplitude, cmap="magma", vmin=0, vmax=vmax)
+    fig.colorbar(im, ax=ax, label="Wavelet amplitude")
+    ax.set_title("CWT Ribbon Amplitude")
+    fig.savefig(OUTPUT_DIR / "cwt_amplitude_map.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
+    # CWT-based amplitude vs. spacing scatter
+    fig, _ = plot_amplitude_vs_spacing(amp_s, wl_s, r_cwt, p_cwt)
+    ax = fig.axes[0]
+    ax.set_xlabel("Dominant wavelength (m)")
+    ax.set_ylabel("Wavelet amplitude")
+    ax.set_title("CWT: Ribbon Amplitude vs. Spacing")
+    fig.savefig(OUTPUT_DIR / "cwt_amplitude_vs_spacing.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
+    print(f"CWT analysis complete. Outputs in: {OUTPUT_DIR}")
