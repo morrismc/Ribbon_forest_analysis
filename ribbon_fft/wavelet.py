@@ -5,9 +5,11 @@ scales to produce per-pixel maps of dominant wavelength and amplitude.
 This gives much finer spatial localisation of the spacing-amplitude
 relationship than the sliding-window FFT approach.
 
-The Mexican Hat is the negative normalised Laplacian of a Gaussian:
-    psi(x, y; s) = (2 - (x^2 + y^2)/s^2) * exp(-(x^2 + y^2)/(2*s^2))
-It responds to blob-like features at scale s and is isotropic.
+Kernel normalisation follows the continuous CWT convention of Booth et al.
+(2009, Eq. 3) and Kumar & Foufoula-Georgiou (1994): a 1/s prefactor ensures
+that wavelet coefficients are directly comparable across scales.  The
+discrete convolution is scaled by dx^2 to approximate the continuous
+double integral.
 
 For directional analysis, an anisotropic (elongated) Morlet can be used
 instead — this is left as a future extension.
@@ -30,20 +32,18 @@ def mexican_hat_2d(size, scale):
     Returns
     -------
     kernel : numpy.ndarray
-        2-D wavelet kernel, normalised to zero mean and unit L2 norm.
+        2-D wavelet kernel with 1/s CWT normalisation (Booth et al. 2009,
+        conv2_mexh.m line 79).
     """
     half = size // 2
     y, x = np.mgrid[-half:half + 1, -half:half + 1].astype(float)
     r2 = x ** 2 + y ** 2
     s2 = scale ** 2
 
-    kernel = (2.0 - r2 / s2) * np.exp(-r2 / (2.0 * s2))
-
-    # Normalise: zero mean, unit energy
-    kernel -= kernel.mean()
-    norm = np.sqrt(np.sum(kernel ** 2))
-    if norm > 0:
-        kernel /= norm
+    # Standard CWT kernel with 1/s prefactor (Booth et al. Eq. 3).
+    # This ensures coefficients represent comparable physical amplitudes
+    # across scales — without this, small scales are over-weighted.
+    kernel = (1.0 / scale) * (2.0 - r2 / s2) * np.exp(-r2 / (2.0 * s2))
 
     return kernel
 
@@ -93,9 +93,11 @@ def cwt_2d(data, dx, scales_m=None, n_scales=20):
         ksize = max(ksize, 3)
 
         kernel = mexican_hat_2d(ksize, s_px)
-        # FFT-based convolution is much faster for large kernels
+        # FFT-based convolution is much faster for large kernels.
+        # Multiply by dx^2 to approximate the continuous double integral
+        # (each pixel covers dx * dx area).  See Booth conv2_mexh.m line 83.
         conv = fftconvolve(data_clean, kernel, mode="same")
-        coefficients[i] = conv
+        coefficients[i] = conv * (dx ** 2)
 
     return coefficients, scales_m
 
