@@ -55,8 +55,11 @@ from ribbon_fft.plotting import (
 # DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies.tif")
 DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies.tif")
 
-# Output directory (relative to this file)
-OUTPUT_DIR = Path(__file__).parent / "outputs" if "__file__" in globals() else Path("outputs")
+# Output directory (relative to this file; falls back to cwd in interactive mode)
+try:
+    OUTPUT_DIR = Path(__file__).parent / "outputs"
+except NameError:
+    OUTPUT_DIR = Path("outputs")
 OUTPUT_DIR.mkdir(exist_ok=True)
 
 # Analysis options

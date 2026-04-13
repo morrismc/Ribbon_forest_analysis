@@ -58,10 +58,7 @@ def compute_2d_power_spectrum(data, dx, apply_window=True, zero_pad=True):
     # Apply 2-D Hann window
     if apply_window:
         window = hann2d(nrows, ncols)
-        # Normalise so windowing doesn't change total power
-        # Correction factor = mean(window^2) — preserves power spectral density
-        window_correction = np.sqrt(np.mean(window ** 2))
-        data = data * window / window_correction
+        data = data * window
 
     # Zero-pad
     if zero_pad:
@@ -76,8 +73,14 @@ def compute_2d_power_spectrum(data, dx, apply_window=True, zero_pad=True):
     fft2_shifted = np.fft.fftshift(fft2)
 
     # Power spectral density (periodogram)
-    # Normalise by number of points and grid spacing to get PSD in physical units
-    power = (np.abs(fft2_shifted) ** 2) * (dx ** 2) / (nfft_r * nfft_c)
+    # Standard PSD normalisation: |FFT|^2 * dx^2 / (N * S2), where
+    # S2 = sum(window^2) is the window energy.  When no window is applied
+    # S2 = N (rectangular window), recovering the usual |FFT|^2 * dx^2 / N^2.
+    if apply_window:
+        s2 = np.sum(window ** 2)
+    else:
+        s2 = nrows * ncols  # rectangular window energy
+    power = (np.abs(fft2_shifted) ** 2) * (dx ** 2) / s2
 
     # Frequency axes
     freq_y = np.fft.fftshift(np.fft.fftfreq(nfft_r, d=dx))
@@ -109,17 +112,23 @@ def radial_average(power, freq_x, freq_y, n_bins=None):
     fx, fy = np.meshgrid(freq_x, freq_y)
     freq_mag = np.sqrt(fx ** 2 + fy ** 2)
 
-    # Exclude the DC component (zero frequency)
     max_freq = freq_mag.max()
     if n_bins is None:
         n_bins = min(power.shape) // 2
 
-    bin_edges = np.linspace(0, max_freq, n_bins + 1)
+    # Start bins from the smallest nonzero frequency step so the DC component
+    # (freq_mag == 0) is excluded from the averaging.
+    df = max_freq / n_bins
+    bin_edges = np.linspace(df, max_freq, n_bins + 1)
     bin_centres = 0.5 * (bin_edges[:-1] + bin_edges[1:])
 
     power_r = np.zeros(n_bins)
     for i in range(n_bins):
-        in_bin = (freq_mag >= bin_edges[i]) & (freq_mag < bin_edges[i + 1])
+        if i == n_bins - 1:
+            # Include the upper edge in the last bin
+            in_bin = (freq_mag >= bin_edges[i]) & (freq_mag <= bin_edges[i + 1])
+        else:
+            in_bin = (freq_mag >= bin_edges[i]) & (freq_mag < bin_edges[i + 1])
         if in_bin.any():
             power_r[i] = np.mean(power[in_bin])
 

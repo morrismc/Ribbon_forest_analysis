@@ -152,7 +152,7 @@ def run_phase1(dsm_path, output_dir="outputs", window_size=None, patch=None):
 
 
 def run_phase2(dsm_path, output_dir="outputs", window_size=257, step=64,
-               freq_band=(0.01, 0.033)):
+               freq_band=(0.01, 0.033), phase1_results=None):
     """Run Phase 2: sliding-window spectral mapping and amplitude analysis.
 
     Parameters
@@ -167,6 +167,9 @@ def run_phase2(dsm_path, output_dir="outputs", window_size=257, step=64,
         Step between windows (pixels).
     freq_band : tuple
         (f_min, f_max) frequency band.
+    phase1_results : dict, optional
+        Results dict from run_phase1(). If provided, reuses the detrended
+        array and metadata instead of re-loading and re-detrending.
     """
     from .spatial_map import sliding_window_power
     from .analysis import extract_amplitude, amplitude_spacing_correlation
@@ -174,12 +177,16 @@ def run_phase2(dsm_path, output_dir="outputs", window_size=257, step=64,
 
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"Loading DSM: {dsm_path}")
-    dsm, transform, crs, dx = load_dsm(dsm_path)
-    dsm_filled = fill_nodata_nearest(dsm)
-
-    print("Detrending...")
-    detrended, _, _ = detrend_dsm(dsm_filled)
+    if phase1_results is not None:
+        detrended = phase1_results["detrended"]
+        dx = phase1_results["dx"]
+        print("Reusing detrended DSM from Phase 1.")
+    else:
+        print(f"Loading DSM: {dsm_path}")
+        dsm, transform, crs, dx = load_dsm(dsm_path)
+        dsm_filled = fill_nodata_nearest(dsm)
+        print("Detrending...")
+        detrended, _, _ = detrend_dsm(dsm_filled)
 
     print(f"Sliding-window spectral analysis (window={window_size}, step={step})...")
     print(f"  Frequency band: {freq_band[0]:.4f} - {freq_band[1]:.4f} cycles/m")
@@ -285,6 +292,7 @@ Examples:
             window_size=args.sw_window,
             step=args.step,
             freq_band=tuple(args.freq_band),
+            phase1_results=results,
         )
 
 

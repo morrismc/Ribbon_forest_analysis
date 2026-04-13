@@ -72,7 +72,10 @@ def detrend_dsm(dsm):
     """
     if isinstance(dsm, np.ma.MaskedArray):
         data = dsm.filled(np.nan)
-        mask = dsm.mask if dsm.mask is not np.bool_(False) else np.zeros_like(data, dtype=bool)
+        if isinstance(dsm.mask, np.ndarray):
+            mask = dsm.mask | ~np.isfinite(data)
+        else:
+            mask = ~np.isfinite(data)
     else:
         data = dsm.copy()
         mask = ~np.isfinite(data)
@@ -81,7 +84,7 @@ def detrend_dsm(dsm):
     detrended = data - plane
 
     # Re-apply NaN where original was masked
-    if mask.any():
+    if np.any(mask):
         detrended[mask] = np.nan
 
     return detrended, plane, coeffs
