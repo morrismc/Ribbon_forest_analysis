@@ -81,10 +81,11 @@ def fill_nodata_nearest(dsm):
     from scipy.ndimage import distance_transform_edt
 
     data = dsm.data.copy()
-    mask = dsm.mask if dsm.mask is not np.bool_(False) else np.zeros_like(data, dtype=bool)
 
-    if not mask.any():
+    # dsm.mask can be np.ma.nomask (a scalar False) when no pixels are masked
+    if not isinstance(dsm.mask, np.ndarray) or not dsm.mask.any():
         return data
+    mask = dsm.mask
 
     # distance_transform_edt returns indices of nearest valid pixel
     _, nearest_idx = distance_transform_edt(mask, return_distances=True, return_indices=True)

@@ -271,16 +271,24 @@ def plot_power_spectrum_2d(power, freq_x, freq_y,
     else:
         fig = ax.figure
 
-    # Mask zero values for log scale
+    # Mask zero/negative values for log scale
     power_plot = power.copy()
     power_plot[power_plot <= 0] = np.nan
 
     extent = [freq_x[0], freq_x[-1], freq_y[-1], freq_y[0]]
 
+    # Compute percentiles on strictly positive values to keep LogNorm valid
+    positive = power_plot[np.isfinite(power_plot) & (power_plot > 0)]
+    if len(positive) > 0:
+        vmin = np.percentile(positive, 5)
+        vmax = np.percentile(positive, 99)
+        vmin = max(vmin, positive.min())  # guarantee vmin > 0
+    else:
+        vmin, vmax = 1e-10, 1.0
+
     im = ax.imshow(
         power_plot,
-        norm=LogNorm(vmin=np.nanpercentile(power_plot, 5),
-                     vmax=np.nanpercentile(power_plot, 99)),
+        norm=LogNorm(vmin=vmin, vmax=vmax),
         extent=extent,
         cmap="inferno",
         aspect="equal",

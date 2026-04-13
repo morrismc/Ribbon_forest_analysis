@@ -22,15 +22,20 @@ def extract_amplitude(detrended, kernel_size=51):
     amplitude : numpy.ndarray
         2-D array of local peak-to-trough amplitude.
     """
-    # Replace NaN with 0 for the filters
-    data = np.nan_to_num(detrended, nan=0.0)
+    # For maximum_filter, NaN pixels should not register as local maxima;
+    # replace with -inf so they are ignored.  Conversely, for minimum_filter,
+    # replace NaN with +inf so they don't pull the local minimum down.
+    nan_mask = np.isnan(detrended)
+    data_for_max = np.where(nan_mask, -np.inf, detrended)
+    data_for_min = np.where(nan_mask, np.inf, detrended)
 
-    local_max = maximum_filter(data, size=kernel_size)
-    local_min = minimum_filter(data, size=kernel_size)
+    local_max = maximum_filter(data_for_max, size=kernel_size)
+    local_min = minimum_filter(data_for_min, size=kernel_size)
     amplitude = local_max - local_min
 
-    # Mask where original was NaN
-    amplitude[np.isnan(detrended)] = np.nan
+    # Mask where original was NaN, or where the window was entirely NaN
+    # (which yields -inf - inf = -inf)
+    amplitude[nan_mask | ~np.isfinite(amplitude)] = np.nan
 
     return amplitude
 
