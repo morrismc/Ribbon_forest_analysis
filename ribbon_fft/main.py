@@ -28,7 +28,8 @@ from .plotting import (
 )
 
 
-def run_phase1(dsm_path, output_dir="outputs", window_size=None, patch=None):
+def run_phase1(dsm_path, output_dir="outputs", window_size=None, patch=None,
+               detrend_order=1):
     """Run Phase 1 analysis: load, detrend, full-scene FFT, plot spectra.
 
     Parameters
@@ -74,8 +75,8 @@ def run_phase1(dsm_path, output_dir="outputs", window_size=None, patch=None):
     print(f"  Analysis region: {dsm_filled.shape}")
 
     # --- Detrend ---
-    print("Detrending (removing best-fit plane)...")
-    detrended, plane, coeffs = detrend_dsm(dsm_filled)
+    print(f"Detrending (order={detrend_order} polynomial surface)...")
+    detrended, plane, coeffs = detrend_dsm(dsm_filled, order=detrend_order)
     print(f"  Plane coefficients: a={coeffs[0]:.6f}, b={coeffs[1]:.6f}, c={coeffs[2]:.2f}")
 
     # Save detrended DSM as GeoTIFF
@@ -258,6 +259,9 @@ Examples:
                         help="Analyse a central patch of this size (pixels)")
     parser.add_argument("--patch", nargs=3, type=int, metavar=("ROW", "COL", "SIZE"),
                         help="Analyse a specific patch: row_start col_start size")
+    parser.add_argument("--detrend-order", type=int, default=1, choices=[1, 2, 3],
+                        help="Polynomial order for detrending: 1=planar, 2=quadratic, "
+                             "3=cubic (default: 1)")
 
     # Phase 2 options
     parser.add_argument("--spatial-map", action="store_true",
@@ -279,6 +283,7 @@ Examples:
         output_dir=args.output_dir,
         window_size=args.window_size,
         patch=patch_arg,
+        detrend_order=args.detrend_order,
     )
 
     # Phase 2 if requested
