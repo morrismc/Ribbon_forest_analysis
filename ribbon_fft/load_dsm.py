@@ -122,3 +122,78 @@ def save_geotiff(filepath, data, transform, crs, nodata=None):
         nodata=nodata,
     ) as dst:
         dst.write(data, 1)
+
+
+def load_and_align_dem(dem_path, dsm_path):
+    """Load a DEM and resample/align it to match a DSM's grid.
+
+    The DEM may have different resolution and extent than the DSM.
+    This function reprojects/resamples the DEM to match the DSM's
+    transform, CRS, and shape exactly.
+
+    Parameters
+    ----------
+    dem_path : str or Path
+        Path to the DEM GeoTIFF (bare earth).
+    dsm_path : str or Path
+        Path to the DSM GeoTIFF (with canopy) — used as the target grid.
+
+    Returns
+    -------
+    dem_aligned : numpy.ndarray
+        DEM resampled to match the DSM grid.
+    """
+    from rasterio.enums import Resampling
+    from rasterio.warp import reproject
+
+    with rasterio.open(dsm_path) as dsm_src:
+        dst_transform = dsm_src.transform
+        dst_crs = dsm_src.crs
+        dst_shape = (dsm_src.height, dsm_src.width)
+
+    with rasterio.open(dem_path) as dem_src:
+        dem_data = dem_src.read(1).astype(np.float64)
+        dem_nodata = dem_src.nodata
+
+        # Replace nodata with NaN before reprojection
+        if dem_nodata is not None:
+            dem_data[dem_data == dem_nodata] = np.nan
+        dem_data[~np.isfinite(dem_data)] = np.nan
+
+        # Allocate output array
+        dem_aligned = np.full(dst_shape, np.nan, dtype=np.float64)
+
+        reproject(
+            source=dem_data,
+            destination=dem_aligned,
+            src_transform=dem_src.transform,
+            src_crs=dem_src.crs,
+            dst_transform=dst_transform,
+            dst_crs=dst_crs,
+            resampling=Resampling.bilinear,
+            src_nodata=np.nan,
+            dst_nodata=np.nan,
+        )
+
+    return dem_aligned
+
+
+def compute_chm(dsm_filled, dem_aligned):
+    """Compute a canopy height model: CHM = DSM - DEM.
+
+    Parameters
+    ----------
+    dsm_filled : numpy.ndarray
+        DSM with NoData filled (includes canopy).
+    dem_aligned : numpy.ndarray
+        DEM aligned to the DSM grid (bare earth).
+
+    Returns
+    -------
+    chm : numpy.ndarray
+        Canopy height model. Negative values are clipped to 0.
+    """
+    chm = dsm_filled - dem_aligned
+    # Clip negative values (DEM slightly above DSM due to noise/interpolation)
+    chm = np.where(np.isfinite(chm), np.maximum(chm, 0.0), np.nan)
+    return chm

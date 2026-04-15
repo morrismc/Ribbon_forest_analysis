@@ -55,6 +55,10 @@ from ribbon_fft.plotting import (
 # DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies.tif")
 DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies_DSM_04-15-2026.tif")
 
+# ---- DEM (bare earth, for canopy height model) --------------------------------
+# Set to None if you don't have a DEM yet; the CHM cell will be skipped.
+DEM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_site_dem.tif")
+
 # Output directory (relative to this file; falls back to cwd in interactive mode)
 try:
     OUTPUT_DIR = Path(__file__).parent / "outputs"
@@ -274,3 +278,106 @@ if RUN_CWT:
     plt.show()
 
     print(f"CWT analysis complete. Outputs in: {OUTPUT_DIR}")
+
+# %% Cell 8 — Transect peak/trough analysis -----------------------------------
+# 100 random east-west transects, Gaussian-smoothed, with peak/trough detection.
+# This tests H1: do taller ribbons have wider downwind glades?
+RUN_TRANSECTS = True
+
+if RUN_TRANSECTS:
+    from ribbon_fft.transect import run_transect_analysis
+    from ribbon_fft.plotting import plot_transect_summary
+
+    print("Transect peak/trough analysis...")
+    SIGMA_PIXELS = 5       # Gaussian sigma in pixels (~2.5 m smoothing)
+    MIN_DIST_PX  = 80      # minimum peak-to-peak distance (~40 m)
+    MIN_PROM     = 1.0     # minimum peak prominence (m)
+    N_TRANSECTS  = 100
+
+    df_transects, transect_rows = run_transect_analysis(
+        detrended, dx=dx,
+        n_transects=N_TRANSECTS,
+        sigma_pixels=SIGMA_PIXELS,
+        min_distance_pixels=MIN_DIST_PX,
+        min_prominence=MIN_PROM,
+    )
+    print(f"  Detected {len(df_transects)} crest-trough pairs across "
+          f"{len(transect_rows)} transects")
+
+    if len(df_transects) > 0:
+        print(f"  Median amplitude: {df_transects['amplitude_downwind'].median():.1f} m")
+        print(f"  Median crest-to-trough: {df_transects['crest_to_trough_m'].median():.1f} m")
+        print(f"  Median crest-to-crest: {df_transects['crest_to_crest_m'].median():.1f} m")
+
+        # Correlation
+        from scipy.stats import pearsonr
+        valid = df_transects.dropna(subset=["amplitude_downwind", "crest_to_trough_m"])
+        if len(valid) > 2:
+            r, p = pearsonr(valid["crest_to_trough_m"], valid["amplitude_downwind"])
+            print(f"  Pearson r (amplitude vs trough dist) = {r:.4f}, p = {p:.2e}")
+
+        # 6-panel summary figure
+        fft_peak = peak_wl if "peak_wl" in dir() else 65.9
+        fig = plot_transect_summary(
+            detrended, df_transects, transect_rows, dx=dx,
+            fft_peak_wavelength=fft_peak,
+            save_path=str(OUTPUT_DIR / "transect_analysis.png"),
+        )
+        plt.show()
+
+        # Save CSV
+        csv_path = OUTPUT_DIR / "ribbon_crest_trough_measurements.csv"
+        df_transects.to_csv(csv_path, index=False)
+        print(f"  Saved: {csv_path}")
+
+    print(f"Transect analysis complete. Outputs in: {OUTPUT_DIR}")
+
+# %% Cell 9 — Canopy Height Model (CHM = DSM - DEM) ---------------------------
+# Requires the DEM file. Set DEM_PATH at the top of this script.
+RUN_CHM = True
+
+if RUN_CHM and DEM_PATH is not None and DEM_PATH.exists():
+    from ribbon_fft.load_dsm import load_and_align_dem, compute_chm
+
+    print("Computing Canopy Height Model...")
+    print(f"  DEM path: {DEM_PATH}")
+
+    # Load DEM and resample to match DSM grid
+    dem_aligned = load_and_align_dem(str(DEM_PATH), str(DSM_PATH))
+    print(f"  DEM shape (aligned): {dem_aligned.shape}")
+    print(f"  DSM shape: {dsm.shape}")
+
+    # If we cropped the DSM earlier, crop the DEM to match
+    dsm_full = fill_nodata_nearest(dsm)
+    if WINDOW_SIZE is not None:
+        nr_full, nc_full = dsm_full.shape
+        r0 = (nr_full - WINDOW_SIZE) // 2
+        c0 = (nc_full - WINDOW_SIZE) // 2
+        dem_crop = dem_aligned[r0:r0 + WINDOW_SIZE, c0:c0 + WINDOW_SIZE]
+        dsm_crop = dsm_full[r0:r0 + WINDOW_SIZE, c0:c0 + WINDOW_SIZE]
+    else:
+        dem_crop = dem_aligned
+        dsm_crop = dsm_full
+
+    chm = compute_chm(dsm_crop, dem_crop)
+    print(f"  CHM range: {np.nanmin(chm):.1f} – {np.nanmax(chm):.1f} m")
+    print(f"  Median canopy height: {np.nanmedian(chm):.1f} m")
+
+    # Save CHM as GeoTIFF
+    save_geotiff(
+        str(OUTPUT_DIR / "canopy_height_model.tif"),
+        chm.astype(np.float32),
+        transform, crs,
+    )
+
+    # Plot CHM
+    fig, ax = plt.subplots(figsize=(10, 8))
+    im = ax.imshow(chm, cmap="YlGn", vmin=0, vmax=np.nanpercentile(chm, 98))
+    fig.colorbar(im, ax=ax, label="Canopy height (m)")
+    ax.set_title("Canopy Height Model (DSM \u2013 DEM)")
+    fig.savefig(OUTPUT_DIR / "canopy_height_model.png", dpi=150, bbox_inches="tight")
+    plt.show()
+
+    print(f"CHM complete. Outputs in: {OUTPUT_DIR}")
+elif RUN_CHM:
+    print(f"Skipping CHM: DEM not found at {DEM_PATH}")

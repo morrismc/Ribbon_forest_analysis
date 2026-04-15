@@ -405,3 +405,132 @@ def create_summary_figure(dsm, detrended, power_2d, freq_x, freq_y,
         fig.savefig(save_path, dpi=200, bbox_inches="tight")
 
     return fig
+
+
+def plot_transect_summary(dsm_detrended, df, transect_rows, dx=0.5,
+                          fft_peak_wavelength=65.9, save_path=None):
+    """Create a 6-panel transect analysis summary figure.
+
+    Panels:
+    1. Example transect with raw/smoothed profiles and detected peaks/troughs
+    2. Scatter: amplitude vs. crest-to-trough distance (H1 test)
+    3. Histogram: crest-to-trough distances
+    4. Histogram: crest amplitudes
+    5. Histogram: crest-to-crest spacing
+    6. Map of peak/trough locations on the detrended DSM
+
+    Parameters
+    ----------
+    dsm_detrended : numpy.ndarray
+        2-D detrended DSM.
+    df : pandas.DataFrame
+        Crest-trough measurements from run_transect_analysis().
+    transect_rows : numpy.ndarray
+        Row indices of the transects.
+    dx : float
+        Grid spacing.
+    fft_peak_wavelength : float
+        Dominant wavelength from FFT for reference lines.
+    save_path : str, optional
+
+    Returns
+    -------
+    fig
+    """
+    from .transect import smooth_transect, detect_peaks_troughs
+
+    nrows, ncols = dsm_detrended.shape
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+
+    # Panel 1: Example transect
+    ax = axes[0, 0]
+    example_row = transect_rows[len(transect_rows) // 2]
+    raw = dsm_detrended[example_row, :]
+    sm = smooth_transect(raw)
+    x_m = np.arange(len(raw)) * dx
+    ax.plot(x_m, raw, "gray", alpha=0.4, lw=0.5, label="Raw")
+    if sm is not None:
+        ax.plot(x_m, sm, "k", lw=1, label="Smoothed")
+        p, t = detect_peaks_troughs(sm)
+        if p is not None and len(p) > 0:
+            ax.plot(p * dx, sm[p], "rv", ms=8, label="Crests")
+        if t is not None and len(t) > 0:
+            ax.plot(t * dx, sm[t], "b^", ms=6, label="Troughs")
+    ax.set_xlabel("East\u2013West distance (m)")
+    ax.set_ylabel("Detrended elevation (m)")
+    ax.set_title(f"Example transect (row {example_row})")
+    ax.legend(fontsize=8)
+
+    # Panel 2: Scatter — H1 test
+    ax = axes[0, 1]
+    if len(df) > 0:
+        sc = ax.scatter(
+            df["crest_to_trough_m"], df["amplitude_downwind"],
+            c=df["y_m"], cmap="viridis", alpha=0.5, s=20, edgecolors="none",
+        )
+        fig.colorbar(sc, ax=ax, label="N\u2013S position (m)")
+    ax.set_xlabel("Crest to downwind trough (m)")
+    ax.set_ylabel("Crest amplitude (m)")
+    ax.set_title("H\u2081 test: Amplitude vs. trough distance")
+
+    # Panel 3: Histogram of crest-to-trough distances
+    ax = axes[0, 2]
+    if len(df) > 0:
+        ax.hist(df["crest_to_trough_m"], bins=30, color="steelblue",
+                edgecolor="white", alpha=0.8)
+    ax.axvline(fft_peak_wavelength, color="red", ls="--", lw=1.5,
+               label=f"FFT peak ({fft_peak_wavelength:.1f} m)")
+    ax.set_xlabel("Crest to trough distance (m)")
+    ax.set_ylabel("Count")
+    ax.set_title("Trough distance distribution")
+    ax.legend()
+
+    # Panel 4: Histogram of amplitudes
+    ax = axes[1, 0]
+    if len(df) > 0:
+        ax.hist(df["amplitude_downwind"], bins=30, color="coral",
+                edgecolor="white", alpha=0.8)
+    ax.set_xlabel("Crest amplitude (m)")
+    ax.set_ylabel("Count")
+    ax.set_title("Amplitude distribution")
+
+    # Panel 5: Crest-to-crest spacing
+    ax = axes[1, 1]
+    if len(df) > 0:
+        crest_spacing = df["crest_to_crest_m"].dropna()
+        if len(crest_spacing) > 0:
+            ax.hist(crest_spacing, bins=30, color="seagreen",
+                    edgecolor="white", alpha=0.8)
+    ax.axvline(fft_peak_wavelength, color="red", ls="--", lw=1.5,
+               label=f"FFT peak ({fft_peak_wavelength:.1f} m)")
+    ax.set_xlabel("Crest-to-crest spacing (m)")
+    ax.set_ylabel("Count")
+    ax.set_title("Crest spacing distribution")
+    ax.legend()
+
+    # Panel 6: Map of peak/trough locations
+    ax = axes[1, 2]
+    vmax = np.nanpercentile(np.abs(dsm_detrended), 99)
+    ax.imshow(
+        dsm_detrended, cmap="RdBu_r", aspect="equal",
+        extent=[0, ncols * dx, nrows * dx, 0],
+        vmin=-vmax, vmax=vmax, alpha=0.7,
+    )
+    if len(df) > 0:
+        ax.scatter(df["peak_x_m"], df["y_m"], c="red", s=3,
+                   label="Crests", alpha=0.5)
+        trough_x = df["trough_idx"] * dx
+        ax.scatter(trough_x, df["y_m"], c="blue", s=3,
+                   label="Troughs", alpha=0.5)
+    ax.set_xlabel("East\u2013West (m)")
+    ax.set_ylabel("North\u2013South (m)")
+    ax.set_title("Peak/trough locations on DSM")
+    ax.legend(fontsize=8)
+
+    fig.suptitle("Ribbon Forest Transect Analysis", fontsize=14, y=0.98)
+    fig.tight_layout(rect=[0, 0, 1, 0.96])
+
+    if save_path:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+
+    return fig
