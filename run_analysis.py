@@ -53,7 +53,7 @@ from ribbon_fft.plotting import (
 # ---- EDIT THIS PATH TO POINT AT YOUR DSM ------------------------------------
 # Windows example (use a raw string with r"..." OR forward slashes):
 # DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies.tif")
-DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies.tif")
+DSM_PATH = Path(r"C:\Users\mmorriss\Desktop\Side_projects\Ribbon_forests\GIS\Rasters\Southern_field_site_snowies_DSM_04-15-2026.tif")
 
 # Output directory (relative to this file; falls back to cwd in interactive mode)
 try:
