@@ -381,3 +381,101 @@ if RUN_CHM and DEM_PATH is not None and DEM_PATH.exists():
     print(f"CHM complete. Outputs in: {OUTPUT_DIR}")
 elif RUN_CHM:
     print(f"Skipping CHM: DEM not found at {DEM_PATH}")
+
+# %% Cell 10 — CHM-based ribbon segmentation ---------------------------------
+# Replaces the peak-inversion transect method with explicit canopy/glade
+# segmentation from the CHM (= raw DSM - DTM).  H1 is tested with
+# Spearman rank correlation between crest amplitude and pure glade width.
+RUN_SEGMENTATION = True
+
+if RUN_SEGMENTATION and "chm" in dir():
+    from ribbon_fft.segmentation import run_segmentation_analysis
+    from ribbon_fft.plotting import plot_segmentation_summary
+    from scipy.stats import spearmanr
+
+    print("CHM-based ribbon segmentation...")
+
+    SIGMA_PX          = 4.0   # Gaussian sigma for CHM smoothing (2 m at 0.5 m/px)
+    CHM_THRESHOLD     = 1.5   # canopy/glade threshold (m)
+    OPENING_SIZE      = 3     # 3x3 morphological opening
+    MIN_RIBBON_LEN_M  = 10.0  # reject runs shorter than this
+    N_TRANSECTS_SEG   = 100
+
+    seg = run_segmentation_analysis(
+        chm, dx=dx,
+        sigma_pixels=SIGMA_PX,
+        chm_threshold=CHM_THRESHOLD,
+        opening_size=OPENING_SIZE,
+        min_ribbon_length_m=MIN_RIBBON_LEN_M,
+        n_transects=N_TRANSECTS_SEG,
+    )
+
+    ribbons_df = seg["ribbons_df"]
+    pairs_df = seg["pairs_df"]
+    stats = seg["stats"]
+
+    print(f"  Transects used       : {stats['n_transects']}")
+    print(f"  Ribbons retained     : {stats['n_ribbons']}")
+    print(f"  Ribbon pairs         : {stats['n_pairs']}")
+    print(f"  Rejected short runs  : {stats['n_rejected_short_runs']}")
+    print(f"  Ribbons / transect   : mean = {stats['ribbons_per_transect_mean']:.1f}, "
+          f"median = {stats['ribbons_per_transect_median']:.1f}")
+    print(f"  Canopy fraction      : {stats['canopy_fraction']:.3f}")
+    print(f"  Negative CHM pixels  : {stats['negative_chm_pixels']} "
+          f"({stats['negative_chm_fraction']*100:.2f}% of finite)")
+
+    if len(pairs_df) > 0:
+        c2c = pairs_df["crest_to_crest"].dropna()
+        c2c = c2c[c2c > 0]
+        if len(c2c) > 0:
+            fft_peak = peak_wl if "peak_wl" in dir() else 65.9
+            print(f"  Crest-to-crest       : median = {np.median(c2c):.1f} m, "
+                  f"mean = {np.mean(c2c):.1f} m (FFT peak = {fft_peak:.1f} m)")
+
+        # Spearman H1 tests
+        v1 = pairs_df.dropna(subset=["crest_amplitude_max", "pure_glade_width"])
+        v1 = v1[v1["pure_glade_width"] > 0]
+        if len(v1) > 2:
+            rho1, p1 = spearmanr(v1["pure_glade_width"], v1["crest_amplitude_max"])
+            print(f"  H1 (amp vs glade)    : Spearman rho = {rho1:.4f}, p = {p1:.2e}, N = {len(v1)}")
+
+        v2 = pairs_df.dropna(subset=["crest_amplitude_max", "crest_to_downwind_edge"])
+        v2 = v2[v2["crest_to_downwind_edge"] > 0]
+        if len(v2) > 2:
+            rho2, p2 = spearmanr(v2["crest_to_downwind_edge"], v2["crest_amplitude_max"])
+            print(f"  H1 (amp vs c2edge)   : Spearman rho = {rho2:.4f}, p = {p2:.2e}, N = {len(v2)}")
+
+    # Save CSVs
+    ribbons_csv = OUTPUT_DIR / "ribbons.csv"
+    pairs_csv = OUTPUT_DIR / "ribbon_pairs.csv"
+    ribbons_df.to_csv(ribbons_csv, index=False)
+    pairs_df.to_csv(pairs_csv, index=False)
+    print(f"  Saved: {ribbons_csv}")
+    print(f"  Saved: {pairs_csv}")
+
+    # Save binary ribbon mask as GeoTIFF
+    mask_tif = OUTPUT_DIR / "ribbon_mask.tif"
+    save_geotiff(
+        str(mask_tif),
+        seg["mask"].astype(np.uint8),
+        transform, crs,
+        nodata=None,
+    )
+    print(f"  Saved: {mask_tif}")
+
+    # 7-panel diagnostic figure
+    fft_peak = peak_wl if "peak_wl" in dir() else 65.9
+    seg_fig = plot_segmentation_summary(
+        chm, seg["chm_smooth"], seg["mask"],
+        ribbons_df, pairs_df, seg["transect_rows"],
+        dx=dx,
+        chm_threshold=CHM_THRESHOLD,
+        min_ribbon_length_m=MIN_RIBBON_LEN_M,
+        fft_peak_wavelength=fft_peak,
+        save_path=str(OUTPUT_DIR / "segmentation_summary.png"),
+    )
+    plt.show()
+
+    print(f"Segmentation complete. Outputs in: {OUTPUT_DIR}")
+elif RUN_SEGMENTATION:
+    print("Skipping segmentation: CHM not available (run Cell 9 first).")

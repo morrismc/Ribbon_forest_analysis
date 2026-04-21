@@ -534,3 +534,225 @@ def plot_transect_summary(dsm_detrended, df, transect_rows, dx=0.5,
         fig.savefig(save_path, dpi=200, bbox_inches="tight")
 
     return fig
+
+
+def plot_segmentation_summary(chm, chm_smooth, mask, ribbons_df, pairs_df,
+                              transect_rows, dx=0.5,
+                              chm_threshold=1.5,
+                              min_ribbon_length_m=10.0,
+                              fft_peak_wavelength=65.9,
+                              save_path=None):
+    """7-panel diagnostic figure for CHM-based ribbon segmentation.
+
+    Panels:
+        1. Example transect — smoothed CHM with retained ribbons shaded
+           green, rejected runs orange, crests marked, edges marked.
+        2. Histogram of ribbon widths.
+        3. Histogram of crest amplitudes (max canopy height per ribbon).
+        4. H1 scatter: crest_amplitude_max vs. pure_glade_width.
+        5. H1 scatter: crest_amplitude_max vs. crest_to_downwind_edge.
+        6. Histogram of crest-to-crest spacing, with FFT peak marked.
+        7. Spatial map: CHM background, ribbon mask overlay.
+
+    Parameters
+    ----------
+    chm : numpy.ndarray
+        Raw canopy height model (for the spatial panel).
+    chm_smooth : numpy.ndarray
+        Smoothed CHM (used for the example transect).
+    mask : numpy.ndarray of bool
+        Binary ribbon mask.
+    ribbons_df, pairs_df : pandas.DataFrame
+    transect_rows : numpy.ndarray
+    dx : float
+    chm_threshold : float
+    min_ribbon_length_m : float
+    fft_peak_wavelength : float
+    save_path : str, optional
+
+    Returns
+    -------
+    fig
+    """
+    from .segmentation import extract_runs
+
+    nrows, ncols = mask.shape
+    min_length_px = int(np.ceil(min_ribbon_length_m / dx))
+
+    fig = plt.figure(figsize=(18, 13))
+    gs = fig.add_gridspec(3, 3, hspace=0.35, wspace=0.3)
+
+    # --- Panel 1: Example transect ---
+    ax1 = fig.add_subplot(gs[0, :])
+    if len(transect_rows) > 0:
+        example_row = int(transect_rows[len(transect_rows) // 2])
+    else:
+        example_row = nrows // 2
+    x_m = np.arange(ncols) * dx
+    ax1.plot(x_m, chm_smooth[example_row, :], "k", lw=0.8,
+             label="Smoothed CHM (m)")
+    ax1.axhline(chm_threshold, color="gray", ls="--", lw=0.8,
+                label=f"Threshold = {chm_threshold} m")
+
+    starts, ends = extract_runs(mask[example_row, :])
+    kept_label_done = False
+    rejected_label_done = False
+    for s, e in zip(starts, ends):
+        x0 = s * dx
+        x1 = (e + 1) * dx
+        run_px = e - s + 1
+        if run_px >= min_length_px:
+            ax1.axvspan(
+                x0, x1, color="green", alpha=0.25,
+                label="Ribbon (kept)" if not kept_label_done else None,
+            )
+            kept_label_done = True
+        else:
+            ax1.axvspan(
+                x0, x1, color="orange", alpha=0.3,
+                label="Rejected run" if not rejected_label_done else None,
+            )
+            rejected_label_done = True
+
+    row_ribbons = ribbons_df[ribbons_df["row_idx"] == example_row] \
+        if len(ribbons_df) else ribbons_df
+    if len(row_ribbons) > 0:
+        ax1.plot(row_ribbons["crest_x_m"], row_ribbons["crest_amplitude_max"],
+                 "rv", ms=8, label="Crests")
+        ax1.plot(row_ribbons["leading_edge_m"],
+                 np.full(len(row_ribbons), chm_threshold),
+                 "g|", ms=14, mew=2, label="Leading edge")
+        ax1.plot(row_ribbons["trailing_edge_m"],
+                 np.full(len(row_ribbons), chm_threshold),
+                 "b|", ms=14, mew=2, label="Trailing edge")
+    ax1.set_xlabel("East–West distance (m)")
+    ax1.set_ylabel("Canopy height (m)")
+    ax1.set_title(f"Example transect (row {example_row})")
+    ax1.legend(fontsize=8, ncol=4, loc="upper right")
+
+    # --- Panel 2: Ribbon width histogram ---
+    ax2 = fig.add_subplot(gs[1, 0])
+    if len(ribbons_df) > 0:
+        ax2.hist(ribbons_df["width_m"], bins=30, color="seagreen",
+                 edgecolor="white", alpha=0.85)
+    ax2.axvline(min_ribbon_length_m, color="red", ls="--", lw=1.2,
+                label=f"Min = {min_ribbon_length_m:.0f} m")
+    ax2.set_xlabel("Ribbon width (m)")
+    ax2.set_ylabel("Count")
+    ax2.set_title("Ribbon width distribution")
+    ax2.legend(fontsize=8)
+
+    # --- Panel 3: Amplitude histogram ---
+    ax3 = fig.add_subplot(gs[1, 1])
+    if len(ribbons_df) > 0:
+        ax3.hist(ribbons_df["crest_amplitude_max"], bins=30, color="coral",
+                 edgecolor="white", alpha=0.85)
+    ax3.set_xlabel("Max canopy height per ribbon (m)")
+    ax3.set_ylabel("Count")
+    ax3.set_title("Crest amplitude distribution")
+
+    # --- Panel 4: H1 scatter — amplitude vs. pure glade width ---
+    ax4 = fig.add_subplot(gs[1, 2])
+    if len(pairs_df) > 0:
+        valid = pairs_df.dropna(
+            subset=["crest_amplitude_max", "pure_glade_width"]
+        )
+        valid = valid[valid["pure_glade_width"] > 0]
+        if len(valid) > 0:
+            sc = ax4.scatter(
+                valid["pure_glade_width"], valid["crest_amplitude_max"],
+                c=valid["y_m"], cmap="viridis", s=18, alpha=0.55,
+                edgecolors="none",
+            )
+            fig.colorbar(sc, ax=ax4, label="N–S (m)", shrink=0.85)
+            try:
+                from scipy.stats import spearmanr
+                rho, pval = spearmanr(
+                    valid["pure_glade_width"], valid["crest_amplitude_max"]
+                )
+                ax4.text(
+                    0.04, 0.96,
+                    f"Spearman ρ = {rho:.3f}\np = {pval:.2e}\nN = {len(valid)}",
+                    transform=ax4.transAxes, va="top",
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8),
+                    fontsize=9,
+                )
+            except Exception:
+                pass
+    ax4.set_xlabel("Pure glade width (m)")
+    ax4.set_ylabel("Crest amplitude (m)")
+    ax4.set_title("H₁: amplitude vs. glade width")
+
+    # --- Panel 5: H1 scatter — amplitude vs. crest_to_downwind_edge ---
+    ax5 = fig.add_subplot(gs[2, 0])
+    if len(pairs_df) > 0:
+        valid = pairs_df.dropna(
+            subset=["crest_amplitude_max", "crest_to_downwind_edge"]
+        )
+        valid = valid[valid["crest_to_downwind_edge"] > 0]
+        if len(valid) > 0:
+            sc = ax5.scatter(
+                valid["crest_to_downwind_edge"], valid["crest_amplitude_max"],
+                c=valid["y_m"], cmap="viridis", s=18, alpha=0.55,
+                edgecolors="none",
+            )
+            fig.colorbar(sc, ax=ax5, label="N–S (m)", shrink=0.85)
+            try:
+                from scipy.stats import spearmanr
+                rho, pval = spearmanr(
+                    valid["crest_to_downwind_edge"],
+                    valid["crest_amplitude_max"],
+                )
+                ax5.text(
+                    0.04, 0.96,
+                    f"Spearman ρ = {rho:.3f}\np = {pval:.2e}\nN = {len(valid)}",
+                    transform=ax5.transAxes, va="top",
+                    bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.8),
+                    fontsize=9,
+                )
+            except Exception:
+                pass
+    ax5.set_xlabel("Crest to downwind edge (m)")
+    ax5.set_ylabel("Crest amplitude (m)")
+    ax5.set_title("H₁: amplitude vs. crest-to-edge")
+
+    # --- Panel 6: Crest-to-crest spacing ---
+    ax6 = fig.add_subplot(gs[2, 1])
+    if len(pairs_df) > 0:
+        c2c = pairs_df["crest_to_crest"].dropna()
+        c2c = c2c[c2c > 0]
+        if len(c2c) > 0:
+            ax6.hist(c2c, bins=30, color="steelblue",
+                     edgecolor="white", alpha=0.85)
+            med = float(np.median(c2c))
+            ax6.axvline(med, color="black", ls="-", lw=1.2,
+                        label=f"Median = {med:.1f} m")
+    ax6.axvline(fft_peak_wavelength, color="red", ls="--", lw=1.5,
+                label=f"FFT peak = {fft_peak_wavelength:.1f} m")
+    ax6.set_xlabel("Crest-to-crest spacing (m)")
+    ax6.set_ylabel("Count")
+    ax6.set_title("Crest-to-crest spacing")
+    ax6.legend(fontsize=8)
+
+    # --- Panel 7: Spatial map — CHM with ribbon mask overlay ---
+    ax7 = fig.add_subplot(gs[2, 2])
+    vmax = np.nanpercentile(chm, 98) if np.any(np.isfinite(chm)) else 1.0
+    ax7.imshow(
+        chm, cmap="YlGn", vmin=0, vmax=vmax,
+        extent=[0, ncols * dx, nrows * dx, 0],
+    )
+    # Red overlay where mask is True
+    overlay = np.zeros((*mask.shape, 4), dtype=float)
+    overlay[mask, 0] = 1.0      # R
+    overlay[mask, 3] = 0.35     # alpha
+    ax7.imshow(overlay, extent=[0, ncols * dx, nrows * dx, 0])
+    ax7.set_xlabel("East–West (m)")
+    ax7.set_ylabel("North–South (m)")
+    ax7.set_title("CHM with ribbon mask (red)")
+
+    fig.suptitle("CHM-based Ribbon Segmentation", fontsize=14, y=0.995)
+
+    if save_path:
+        fig.savefig(save_path, dpi=200, bbox_inches="tight")
+
+    return fig
